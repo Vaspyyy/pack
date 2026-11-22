@@ -87,21 +87,21 @@ pack reads what git tracks (`git ls-files`), from the work tree. Untracked and i
 
 | Reason | Which files |
 | --- | --- |
-| excluded | matched by `-x`: a pattern without a slash matches any folder or the file name (`testdata`, `*.golden`), one with a slash matches from the top (`site/src`) |
+| excluded | matched by `-x`: a pattern without a slash matches any folder or the file name (`testdata`, `*.golden`), one with a slash matches from the top (`site/src`); `*` and `?` match within one name |
 | vendored | in a `vendor/`, `third_party/`, `third-party/`, `node_modules/` or `bower_components/` folder, or marked `linguist-vendored` in `.gitattributes` |
 | generated | marked `linguist-generated`, `*.min.js`, `*.min.css`, `*.js.map`, `*.css.map`, Gradle and Maven wrapper scripts |
 | lockfile | `go.sum`, `Cargo.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `poetry.lock`, `uv.lock`, `Gemfile.lock`, `composer.lock`, `flake.lock` and others |
 | license text | `LICENSE`, `LICENCE`, `COPYING`, `UNLICENSE`, with or without `.md` or `.txt` |
 | media | images (SVG too), fonts, audio, video, 3D models, PDFs and archives, by extension |
-| binary | a NUL byte in the first 8,000 bytes, or bytes that aren't UTF-8 |
+| binary | a NUL byte in the first 8,000 bytes, or bytes that aren't UTF-8 (so text in Latin-1 or Windows-1252 too) |
 | size | files over 256 KB (`--max-file KB`, 0 for no limit) |
-| other | symlinks, submodules, files deleted in the work tree |
+| other | symlinks, submodules, files not in the work tree (deleted, or outside a sparse checkout) |
 
 When pack clones a repository, Git LFS files aren't downloaded: their small pointer files stand in for them, and go in unless the name already leaves them out (an image, a font). A local checkout is read as it is.
 
 ### Parts
 
-A Google Doc holds about 1.02 million characters, so a repository longer than 1,000,000 characters (`--max-chars N`, 0 for no limit) is split between files into parts. Part 1 has the header, the map, the recent changes and the first files; each later part starts with its own short header. The parts are `NAME.md`, `NAME-2.md`, `NAME-3.md` and so on, so the first part keeps its name when a repository grows. Printing to standard output takes one part: a repository that needs more stops with exit code 2 and says so.
+A Google Doc holds about 1.02 million characters, so a repository longer than 1,000,000 characters (`--max-chars N`, 0 for no limit) is split between files into parts. Characters are counted the safe way: one outside the Basic Multilingual Plane (an emoji) counts as two, as in UTF-16. Part 1 has the header, the map, the recent changes and the first files; each later part starts with its own short header. The parts are `NAME.md`, `NAME-2.md`, `NAME-3.md` and so on, so the first part keeps its name when a repository grows. Printing to standard output takes one part: a repository that needs more stops with exit code 2 and says so.
 
 ### Several repositories, and pack.json
 
@@ -125,7 +125,9 @@ A Google Doc holds about 1.02 million characters, so a repository longer than 1,
 }
 ```
 
-Every repository is read before anything is written: if one can't be packed, pack stops with exit code 2 and the folder stays as it was. A part that the folder's previous `pack.json` listed and this run doesn't write any more is removed; nothing else in the folder is touched. The output depends only on the files, the commits and pack's version, not on the time it was made, so packing the same commit again gives the same bytes and the same `sha256`.
+Every repository is read before anything is written: if one can't be packed, pack stops with exit code 2 and the folder stays as it was. pack only replaces files that its own last `pack.json` in the folder lists: a `NAME.md` that is there for another reason stops it with exit code 2. A part that the last `pack.json` listed and this run doesn't write any more is removed while it is still what pack wrote (same `sha256`), and kept with a note if it was changed. Nothing else in the folder is touched.
+
+The output depends only on what is packed (the files, the commits, the repository's name and, for a local folder, whether tracked files have uncommitted changes) and on pack's version: not on the time, and not on git settings such as `core.abbrev` or `diff.*`. Packing the same commit again gives the same bytes and the same `sha256`.
 
 ### Flags
 

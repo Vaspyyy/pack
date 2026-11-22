@@ -77,7 +77,7 @@ func openDir(dir string) (*source, error) {
 		return nil, err
 	}
 	if !info.Git {
-		return nil, fmt.Errorf("isn't in a git repository (pack packs what git tracks)")
+		return nil, fmt.Errorf("isn't in a git work tree (pack packs the files git tracks there)")
 	}
 	if info.Head == "" {
 		return nil, fmt.Errorf("the repository has no commits yet")
@@ -179,7 +179,7 @@ func (s *source) attrs(files []string) map[string]string {
 	if len(files) == 0 {
 		return marked
 	}
-	cmd := exec.Command("git", "-C", s.root, "check-attr", "-z", "--stdin", "linguist-vendored", "linguist-generated")
+	cmd := exec.Command("git", "--no-optional-locks", "-C", s.root, "check-attr", "-z", "--stdin", "linguist-vendored", "linguist-generated")
 	cmd.Stdin = strings.NewReader(strings.Join(files, "\x00") + "\x00")
 	out, err := cmd.Output()
 	if err != nil {
@@ -214,7 +214,9 @@ func git(dir string, args ...string) (string, error) {
 }
 
 func gitRaw(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "core.quotePath=false"}, args...)...)
+	// --no-optional-locks: git status doesn't refresh the index, so pack
+	// never holds index.lock while someone commits.
+	cmd := exec.Command("git", append([]string{"--no-optional-locks", "-C", dir, "-c", "core.quotePath=false"}, args...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -17,11 +17,11 @@ var reasons = []struct{ key, one, many string }{
 	{"lockfile", "lockfile", "lockfiles"},
 	{"license", "license text", "license texts"},
 	{"media", "image, font or media file", "images, fonts and media files"},
-	{"binary", "binary file", "binary files"},
+	{"binary", "binary or non-UTF-8 file", "binary or non-UTF-8 files"},
 	{"big", "file over the size limit", "files over the size limit"},
 	{"symlink", "symlink", "symlinks"},
 	{"submodule", "submodule", "submodules"},
-	{"missing", "file deleted in the work tree", "files deleted in the work tree"},
+	{"missing", "file not in the work tree", "files not in the work tree"},
 }
 
 var vendorDirs = map[string]bool{"vendor": true, "third_party": true, "third-party": true, "node_modules": true, "bower_components": true}

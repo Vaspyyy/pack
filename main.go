@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -138,11 +139,20 @@ func title(name string, part, parts int) string {
 }
 
 func writeFolder(dir string, results []*result, stdout, stderr io.Writer) int {
-	// Old parts this folder's last pack.json listed and this run doesn't
-	// write again are removed; nothing else in the folder is touched.
+	// pack only replaces or removes what its own last pack.json in this
+	// folder lists, and removes a file only while it is still the bytes
+	// pack wrote. Anything else in the folder is left alone.
 	var old manifest
 	if data, err := os.ReadFile(filepath.Join(dir, manifestName)); err == nil {
-		json.Unmarshal(data, &old)
+		if json.Unmarshal(data, &old) != nil || old.Pack == "" {
+			old = manifest{} // not pack's
+		}
+	}
+	listed := map[string]string{} // file name -> sha256
+	for _, e := range old.Files {
+		if e.File == filepath.Base(e.File) && strings.HasSuffix(e.File, ".md") && e.SHA256 != "" {
+			listed[e.File] = e.SHA256
+		}
 	}
 	m := manifest{Pack: version}
 	type out struct{ path, text string }
@@ -156,6 +166,12 @@ func writeFolder(dir string, results []*result, stdout, stderr io.Writer) int {
 				return 2
 			}
 			seen[name] = r.arg
+			if _, ok := listed[name]; !ok {
+				if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+					fmt.Fprintf(stderr, "pack: %s is already there and pack didn't write it (its pack.json doesn't list it); move it or choose another folder\n", filepath.Join(dir, name))
+					return 2
+				}
+			}
 			sum := sha256.Sum256([]byte(text))
 			m.Files = append(m.Files, entryJSON{
 				File: name, Title: title(r.name, i+1, len(r.parts)), Source: r.source, Commit: r.commit,
@@ -179,15 +195,25 @@ func writeFolder(dir string, results []*result, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pack: %v\n", err)
 		return 2
 	}
-	var removed []string
+	var removed, kept []string
 	for _, e := range old.Files {
-		name := filepath.Base(e.File)
-		if _, ok := seen[name]; ok || name != e.File || !strings.HasSuffix(name, ".md") {
+		name := e.File
+		want, ok := listed[name]
+		if _, again := seen[name]; again || !ok {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, name)); err == nil {
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if sum := sha256.Sum256(data); err != nil || hex.EncodeToString(sum[:]) != want {
+			kept = append(kept, name)
+			continue
+		}
+		if err := os.Remove(path); err == nil {
 			removed = append(removed, name)
-		} else if !errors.Is(err, os.ErrNotExist) {
+		} else {
 			fmt.Fprintf(stderr, "pack: %v\n", err)
 		}
 	}
@@ -204,6 +230,9 @@ func writeFolder(dir string, results []*result, stdout, stderr io.Writer) int {
 	}
 	if len(removed) > 0 {
 		fmt.Fprintf(stdout, "pack: removed %s (no longer written)\n", strings.Join(removed, ", "))
+	}
+	if len(kept) > 0 {
+		fmt.Fprintf(stdout, "pack: kept %s: no longer written, but changed since pack wrote it\n", strings.Join(kept, ", "))
 	}
 	fmt.Fprintf(stdout, "pack: wrote %d %s and %s to %s\n", len(outs), plural(len(outs), "file", "files"), manifestName, dir)
 	return 0
@@ -244,9 +273,8 @@ func parse(args []string) (options, int, string) {
 			i++
 			return args[i], true
 		}
-		// --flag=value
-		if flags && strings.HasPrefix(a, "--") && strings.Contains(a, "=") {
-			k, v, _ := strings.Cut(a, "=")
+		// --flag=value, and -o=value for the short flags with a value
+		if k, v, ok := strings.Cut(a, "="); flags && ok && (strings.HasPrefix(a, "--") || k == "-o" || k == "-x" || k == "-c") {
 			args = append(args[:i:i], append([]string{k, v}, args[i+1:]...)...)
 			a = k
 		}
@@ -270,6 +298,9 @@ func parse(args []string) (options, int, string) {
 			case "-o":
 				o.out = v
 			case "-x", "--exclude":
+				if _, err := path.Match(v, ""); err != nil {
+					return o, 2, fmt.Sprintf("%s %q isn't a valid pattern (* and ? match within a name; there is no **)", a, v)
+				}
 				o.excludes = append(o.excludes, v)
 			default:
 				n, err := strconv.Atoi(strings.ReplaceAll(strings.ReplaceAll(v, "_", ""), ",", ""))

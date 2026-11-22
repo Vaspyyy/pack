@@ -66,22 +66,22 @@ func recent(s *source, n int, keep func(string) bool) ([]commit, error) {
 		} else {
 			c.first = true
 		}
-		// diff-tree, not diff: plumbing, so diff.* settings (noprefix,
-		// mnemonicPrefix, algorithm, …) can't change what is read. The
-		// options that matter are given anyway. --root diffs the first
-		// commit against nothing.
-		diff, err := gitRaw(s.root, "diff-tree", "-p", "--root", "--no-commit-id", "--no-color", "--no-ext-diff", "--no-textconv",
-			"--no-renames", "-U0", "--inter-hunk-context=0", "--diff-algorithm=myers", "--indent-heuristic",
-			"--src-prefix=a/", "--dst-prefix=b/", f[0], "--", pathspec(s.sub))
+		// The names first, so a commit that adds a whole node_modules
+		// doesn't put its diff in memory; then the diff of only the listed
+		// files that have definitions to find. diff-tree, not diff: it is
+		// plumbing, so diff.* settings (noprefix, mnemonicPrefix,
+		// algorithm, …) can't change what is read, and the options that
+		// matter are given anyway. --root diffs the first commit against
+		// nothing.
+		names, err := gitRaw(s.root, "diff-tree", "-r", "--root", "--no-commit-id", "--no-renames", "--name-status", "-z", f[0], "--", pathspec(s.sub))
 		if err != nil {
 			return nil, err
 		}
-		for _, fd := range parseDiff(string(diff)) {
-			p := fd.newPath
-			if p == "" {
-				p = fd.oldPath
-			}
-			if !keep(p) {
+		var withSyms []string
+		nf := strings.Split(string(names), "\x00")
+		for i := 0; i+1 < len(nf); i += 2 {
+			status, p := nf[i], nf[i+1]
+			if p == "" || !keep(p) {
 				continue
 			}
 			if len(c.files) == filesPerCommit {
@@ -89,16 +89,39 @@ func recent(s *source, n int, keep func(string) bool) ([]commit, error) {
 				continue
 			}
 			fc := fileChange{path: p}
-			switch {
-			case fd.oldPath == "":
+			switch status {
+			case "A":
 				fc.status = "new"
-			case fd.newPath == "":
+			case "D":
 				fc.status = "deleted"
 			}
-			if outline.Supported(outlineName(p)) && len(fd.hunks) > 0 {
-				touched(&fc, fd, bl, parent, f[0])
-			}
 			c.files = append(c.files, fc)
+			if outline.Supported(outlineName(p)) {
+				withSyms = append(withSyms, p)
+			}
+		}
+		if len(withSyms) > 0 {
+			args := []string{"diff-tree", "-p", "--root", "--no-commit-id", "--no-color", "--no-ext-diff", "--no-textconv",
+				"--no-renames", "-U0", "--inter-hunk-context=0", "--diff-algorithm=myers", "--indent-heuristic",
+				"--src-prefix=a/", "--dst-prefix=b/", f[0], "--"}
+			for _, p := range withSyms {
+				args = append(args, ":(top,literal)"+p)
+			}
+			diff, err := gitRaw(s.root, args...)
+			if err != nil {
+				return nil, err
+			}
+			for _, fd := range parseDiff(string(diff)) {
+				p := fd.newPath
+				if p == "" {
+					p = fd.oldPath
+				}
+				for i := range c.files {
+					if c.files[i].path == p && len(fd.hunks) > 0 {
+						touched(&c.files[i], fd, bl, parent, f[0])
+					}
+				}
+			}
 		}
 		commits = append(commits, c)
 	}
@@ -404,7 +427,7 @@ func (b *blobs) get(rev, path string) ([]byte, bool) {
 		return nil, false
 	}
 	if b.cmd == nil {
-		b.cmd = exec.Command("git", "-C", b.dir, "cat-file", "--batch")
+		b.cmd = exec.Command("git", "--no-optional-locks", "-C", b.dir, "cat-file", "--batch")
 		in, err1 := b.cmd.StdinPipe()
 		out, err2 := b.cmd.StdoutPipe()
 		if err1 != nil || err2 != nil || b.cmd.Start() != nil {
@@ -420,6 +443,11 @@ func (b *blobs) get(rev, path string) ([]byte, bool) {
 	head, err := b.out.ReadString('\n')
 	if err != nil {
 		b.bad = true
+		return nil, false
+	}
+	// "<rev>:<path> missing": nothing follows. Read from the end, since the
+	// path may have spaces.
+	if strings.HasSuffix(head, " missing\n") || strings.HasSuffix(head, " ambiguous\n") {
 		return nil, false
 	}
 	f := strings.Fields(head)

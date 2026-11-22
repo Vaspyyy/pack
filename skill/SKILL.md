@@ -25,7 +25,7 @@ description: Turn a git repository into one Markdown file for NotebookLM, a Gemi
 1. A header: repository, commit, date, files and lines by language, and what was left out by reason (`Left out: 1 lockfile (go.sum); 72 vendored files (vendor/)`).
 2. `## Map`: every file with its line count and its definitions with line numbers (top level and one level in, up to 60 per file; Markdown headings to `###`).
 3. `## Recent changes`: the last 20 commits (merges left out), each with up to 8 lines of its message and the files it changed, with the definitions changed, added or removed.
-4. `## Files`: every file in a code fence under `### path`, READMEs first.
+4. `## Files`: every file in a code fence under `### path`: the top README first, then the other top-level files, then the files in folders.
 
 Only what git tracks goes in, read from the work tree. A local folder with uncommitted changes to tracked files says so in the header.
 

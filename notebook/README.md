@@ -1,6 +1,6 @@
 # A NotebookLM notebook that updates itself
 
-This folder keeps a NotebookLM notebook of the repositories in [repos.txt](repos.txt) up to date, with no computer of yours switched on:
+This folder keeps the sources of a NotebookLM notebook of the repositories in [repos.txt](repos.txt) up to date, with no computer of yours switched on:
 
 ```
 GitHub Actions (every 6 hours)        Google Apps Script (every hour)       NotebookLM
@@ -10,7 +10,7 @@ publish them as release assets        one Google Doc each                   its 
 
 1. **[.github/workflows/notebook.yml](../.github/workflows/notebook.yml)** packs every repository in `repos.txt` every six hours, after every push to this repository's `main`, and when started by hand. It publishes the parts and `pack.json` as assets of the [`notebook` release](https://github.com/Vaspyyy/pack/releases/tag/notebook). When nothing changed, it leaves the assets alone.
 2. **[sync.gs](sync.gs)** runs in your Google account every hour. It reads `pack.json` and, for each part whose SHA-256 changed, downloads it, checks the SHA-256, and writes it into that part's Google Doc in a Drive folder called `Tool notebook`. Each part always goes into the same Doc, so a notebook source made from it stays the same source.
-3. **NotebookLM** uses the Docs as sources. Google Docs from Drive are the source type NotebookLM keeps in step with Drive; uploaded files are copies that never change.
+3. **NotebookLM** uses the Docs as sources. A Google Doc added from Drive stays linked to it: since May 2026 NotebookLM syncs such sources by itself (Google rolled this out gradually), and where it doesn't yet, a source's sync button pulls in the new text. An uploaded file is a copy that never changes.
 
 ## Setup (once, about five minutes)
 
@@ -25,7 +25,7 @@ publish them as release assets        one Google Doc each                   its 
 5. The execution log shows a line per Doc (`updated glint (575,670 characters)`). The Docs are in the Drive folder `Tool notebook`. A run starts no new Doc after four and a half minutes (Apps Script stops scripts at six); the next run carries on, since each Doc that was written is remembered.
 6. In [NotebookLM](https://notebooklm.google.com), make a notebook, choose **Add source**, then **Google Drive**, and pick the Docs in `Tool notebook`.
 
-From then on nothing needs doing. To refresh right away after a push to one of the repositories, start the workflow (`gh workflow run notebook.yml -R Vaspyyy/pack`), wait for it to finish, then run **sync** in the script editor.
+From then on the Docs keep themselves up to date (and NotebookLM with them, where its Drive sync is on). If a run of the workflow fails, for example because a repository in `repos.txt` was renamed or deleted, GitHub emails you, and the Docs keep their last good version until `repos.txt` is fixed. To refresh right away after a push to one of the repositories, start the workflow (`gh workflow run notebook.yml -R Vaspyyy/pack`), wait for it to finish, then run **sync** in the script editor.
 
 ## Adding or removing a repository
 
@@ -45,4 +45,6 @@ A repository that grows past 1,000,000 characters gets a second part and so a ne
 
 ## For your own repositories
 
-Fork this repository, put your repositories in `repos.txt` (public ones; a private one needs a token with access in the workflow), and change `MANIFEST_URL` at the top of `sync.gs` to your fork's release (`https://github.com/<you>/pack/releases/download/notebook/pack.json`).
+Fork this repository, put your repositories in `repos.txt`, and change `MANIFEST_URL` at the top of `sync.gs` to your fork's release (`https://github.com/<you>/pack/releases/download/notebook/pack.json`).
+
+Only public repositories belong in `repos.txt`: the packed files are assets of a public release, which anyone can download.

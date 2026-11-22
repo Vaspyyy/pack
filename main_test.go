@@ -133,7 +133,7 @@ func TestPack(t *testing.T) {
 		"The source code of demo at commit ",
 		", 2026-01-02, put into one file by pack "+version,
 		"1 lockfile (go.sum)", "1 license text (LICENSE)", "1 vendored file (vendor/)",
-		"1 generated file (gen.go)", "1 image, font or media file (logo.png)", "1 binary file (data.bin)",
+		"1 generated file (gen.go)", "1 image, font or media file (logo.png)", "1 binary or non-UTF-8 file (data.bin)",
 		"1 file over the size limit (big.txt 300 KB)",
 		"## Map\n\nREADME.md (7 lines)\n  L1 # demo\n    L5 ## Usage\n",
 		"main.go (11 lines)\n  L3 func main()\n  L7 func helper() int\n  L11 func fresh()\n",
@@ -521,5 +521,55 @@ func TestManyPartsStayInsideTheLimit(t *testing.T) {
 		if e.Chars > 10000 {
 			t.Errorf("%s: %d characters", e.File, e.Chars)
 		}
+	}
+}
+
+func TestFolderSafety(t *testing.T) {
+	dir := demo(t)
+	outDir := t.TempDir()
+
+	// A file pack didn't write is never replaced.
+	write(t, outDir, "demo.md", "my notes")
+	_, errs, code := pack(t, "-o", outDir, dir)
+	if code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	wants(t, errs, "demo.md is already there and pack didn't write it")
+	if data, _ := os.ReadFile(filepath.Join(outDir, "demo.md")); string(data) != "my notes" {
+		t.Error("demo.md was replaced")
+	}
+
+	// A pack.json that isn't pack's can't make it delete anything.
+	os.Remove(filepath.Join(outDir, "demo.md"))
+	write(t, outDir, "README.md", "theirs")
+	write(t, outDir, manifestName, `{"files":[{"file":"README.md","sha256":"x"}]}`)
+	if _, errs, code := pack(t, "-o", outDir, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "README.md")); err != nil {
+		t.Error("README.md was deleted")
+	}
+
+	// A part that is no longer written goes, unless it was changed.
+	for i := 0; i < 10; i++ {
+		write(t, dir, "f"+itoa(i)+".txt", strings.Repeat("words ", 500)+"\n")
+	}
+	gitT(t, dir, "add", "-A")
+	gitT(t, dir, "commit", "-q", "-m", "more")
+	if _, errs, code := pack(t, "--max-chars", "10000", "-o", outDir, dir); code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	write(t, outDir, "demo-2.md", "edited by hand")
+	out, errs, code := pack(t, "-o", outDir, dir)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	wants(t, out, "pack: removed demo-3.md", "pack: kept demo-2.md: no longer written, but changed since pack wrote it")
+}
+
+func TestBadPattern(t *testing.T) {
+	_, errs, code := pack(t, "-x=[a", ".")
+	if code != 2 || !strings.Contains(errs, `isn't a valid pattern`) {
+		t.Errorf("exit %d: %s", code, errs)
 	}
 }

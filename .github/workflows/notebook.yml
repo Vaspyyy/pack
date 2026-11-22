@@ -21,15 +21,26 @@ concurrency:
 jobs:
   pack:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: pack
+        # pack writes nothing unless every repository could be packed, so a
+        # repository that is gone (renamed, deleted) fails the run and the
+        # notebook keeps its last good version; a passing network error is
+        # tried again.
         run: |
           go build -o "$RUNNER_TEMP/pack" .
-          grep -v -e '^#' -e '^[[:space:]]*$' notebook/repos.txt | xargs "$RUNNER_TEMP/pack" -o "$RUNNER_TEMP/out"
+          sed -e 's/#.*//' notebook/repos.txt | xargs > "$RUNNER_TEMP/repos"
+          for try in 1 2 3; do
+            # shellcheck disable=SC2046
+            "$RUNNER_TEMP/pack" -o "$RUNNER_TEMP/out" $(cat "$RUNNER_TEMP/repos") && exit 0
+            sleep 30
+          done
+          exit 1
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}

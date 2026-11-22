@@ -196,7 +196,17 @@ func readmeRank(p, sub string) int {
 	return 1
 }
 
-func charCount(s string) int { return utf8.RuneCountInString(s) }
+// charCount counts characters the safe way for a Google Doc: one outside
+// the Basic Multilingual Plane (an emoji) counts as two, as in UTF-16.
+func charCount(s string) int {
+	n := utf8.RuneCountInString(s)
+	for _, r := range s {
+		if r > 0xFFFF {
+			n++
+		}
+	}
+	return n
+}
 
 type header struct {
 	s       *source

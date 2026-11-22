@@ -112,10 +112,16 @@ function syncPart_(props, folder, base, f) {
 /** Makes a part's Doc in the folder; returns its Drive file. */
 function newDoc_(props, folder, f) {
   const doc = DocumentApp.create(f.title);
-  const file = DriveApp.getFileById(doc.getId());
-  file.moveTo(folder);
+  // Remembered before anything else can fail, so a failed move doesn't
+  // make another Doc next run.
   props.setProperty('doc:' + f.file, doc.getId());
   props.deleteProperty('sha:' + f.file);
+  const file = DriveApp.getFileById(doc.getId());
+  try {
+    file.moveTo(folder);
+  } catch (e) {
+    console.warn(f.file + ': its new Doc stays in My Drive (' + e.message + ')');
+  }
   return file;
 }
 
