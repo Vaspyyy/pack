@@ -1,0 +1,13 @@
+# The repositories the notebook workflow packs, one per line (owner/repo).
+# A new line here becomes a new Doc in the notebook after the next run.
+Vaspyyy/glint
+Vaspyyy/crux
+Vaspyyy/recap
+Vaspyyy/seek
+Vaspyyy/splice
+Vaspyyy/peek
+Vaspyyy/lens
+Vaspyyy/pulse
+Vaspyyy/prism
+Vaspyyy/lumen
+Vaspyyy/pack

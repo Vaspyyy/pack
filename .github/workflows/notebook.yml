@@ -1,0 +1,55 @@
+name: notebook
+
+# Packs the repositories in notebook/repos.txt and publishes the parts and
+# pack.json as assets of the "notebook" release, where notebook/sync.gs
+# picks them up for Google Docs. notebook/README.md has the whole setup.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: notebook
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: pack
+        run: |
+          go build -o "$RUNNER_TEMP/pack" .
+          grep -v -e '^#' -e '^[[:space:]]*$' notebook/repos.txt | xargs "$RUNNER_TEMP/pack" -o "$RUNNER_TEMP/out"
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUT: ${{ runner.temp }}/out
+        run: |
+          if ! gh release view notebook >/dev/null 2>&1; then
+            gh release create notebook --prerelease --latest=false --title "Notebook" \
+              --notes "The repositories in notebook/repos.txt, packed by the notebook workflow. notebook/README.md says how they get into NotebookLM."
+          fi
+          # Nothing changed since the last run: leave the assets alone.
+          if gh release download notebook -p pack.json -O "$RUNNER_TEMP/old.json" 2>/dev/null &&
+            cmp -s "$RUNNER_TEMP/old.json" "$OUT/pack.json"; then
+            echo "no changes"
+            exit 0
+          fi
+          # The parts first and pack.json last, so pack.json never lists a
+          # part that isn't there yet.
+          gh release upload notebook "$OUT"/*.md --clobber
+          gh release upload notebook "$OUT/pack.json" --clobber
+          # Parts this run didn't write (a repository that got smaller).
+          gh release view notebook --json assets --jq '.assets[].name' | while read -r a; do
+            [ -e "$OUT/$a" ] || gh release delete-asset notebook "$a" --yes
+          done
