@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/Vaspyyy/prism/outline"
 )
@@ -55,7 +54,7 @@ func recent(s *source, n int, keep func(string) bool) ([]commit, error) {
 		}
 		// The short hash is cut here, not by git, whose length follows
 		// core.abbrev and the size of the repository.
-		c := commit{short: short(f[0]), date: f[1], subject: f[2], body: bodyLines(f[4])}
+		c := commit{short: short(f[0]), date: f[1], subject: clip(oneLine(f[2]), 160), body: bodyLines(f[4])}
 		parent := ""
 		if ps := strings.Fields(f[3]); len(ps) > 0 {
 			parent = ps[0]
@@ -96,7 +95,7 @@ func recent(s *source, n int, keep func(string) bool) ([]commit, error) {
 			case fd.newPath == "":
 				fc.status = "deleted"
 			}
-			if outline.Supported(p) && len(fd.hunks) > 0 {
+			if outline.Supported(outlineName(p)) && len(fd.hunks) > 0 {
 				touched(&fc, fd, bl, parent, f[0])
 			}
 			c.files = append(c.files, fc)
@@ -229,12 +228,12 @@ func touched(fc *fileChange, fd fileDiff, bl *blobs, parent, commit string) {
 	var oldSyms, newSyms []outline.Symbol
 	if fd.oldPath != "" {
 		if data, ok := bl.get(parent, fd.oldPath); ok {
-			oldSyms = outline.Parse(fd.oldPath, data, symbolLimit)
+			oldSyms = outline.Parse(outlineName(fd.oldPath), data, symbolLimit)
 		}
 	}
 	if fd.newPath != "" {
 		if data, ok := bl.get(commit, fd.newPath); ok {
-			newSyms = outline.Parse(fd.newPath, data, symbolLimit)
+			newSyms = outline.Parse(outlineName(fd.newPath), data, symbolLimit)
 		}
 	}
 	oldNames, newNames := names(oldSyms), names(newSyms)
@@ -352,7 +351,7 @@ func renderChanges(commits []commit, asked int) string {
 			b.WriteString("  (the first commit)\n")
 		}
 		for _, f := range c.files {
-			b.WriteString("  " + f.path)
+			b.WriteString("  " + oneLine(f.path))
 			if f.status != "" {
 				b.WriteString(" (" + f.status + ")")
 			}
@@ -477,12 +476,7 @@ func bodyLines(body string) []string {
 		lines = append(lines[:bodyLimit], fmt.Sprintf("… (%d more lines)", len(lines)-bodyLimit))
 	}
 	for i, l := range lines {
-		l = clean([]byte(l))
-		l = strings.TrimSuffix(l, "\n")
-		if utf8.RuneCountInString(l) > 160 {
-			l = string([]rune(l)[:159]) + "…"
-		}
-		lines[i] = l
+		lines[i] = clip(oneLine(l), 160)
 	}
 	return lines
 }

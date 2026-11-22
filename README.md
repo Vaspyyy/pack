@@ -31,7 +31,7 @@ pack [flags] REPO > repo.md
 pack [flags] -o FOLDER REPO...
 ```
 
-`REPO` is a folder in a git repository, or a GitHub repository: `owner/repo`, `github.com/owner/repo`, an https URL or a `git@github.com:` address. A GitHub repository is cloned shallowly into a temporary folder, which is removed afterwards. A subfolder packs only itself (`pack site` in a repository with a `site/` folder), named after the repository and the folder (`lumen-site`).
+`REPO` is a folder in a git repository, or a GitHub repository: `owner/repo`, `github.com/owner/repo`, an https URL or a `git@github.com:` address. A GitHub repository is cloned shallowly into a temporary folder, which is removed afterwards. A subfolder packs only itself (`pack site` in a repository with a `site/` folder), named after the repository and the folder (`lumen-site`). A name like `src/lib` where a local folder `src` exists is taken as a mistyped path, not sent to GitHub; write `github.com/src/lib` for the repository.
 
 ```
 $ pack Vaspyyy/peek > peek.md
@@ -77,9 +77,9 @@ The last 6 commits, newest first (merges left out). ...
 ### What goes in
 
 - **The header**: the repository, commit and date (and "with uncommitted changes" for a local folder that has them), the number of files and lines by language, and what was left out, counted by reason with a few names each.
-- **Map**: every packed file with its line count. Under each, its definitions with their line numbers: top-level ones and those right inside them (a class's methods, a Rust `impl`'s functions), up to 60 per file, and Markdown headings down to `###`. Line numbers count from the top of the file, as in the file section below.
-- **Recent changes**: the last 20 commits (`-c N`), merges left out, newest first. Each has its date, short hash and subject, the first 8 lines of its message without trailers like `Co-Authored-By:`, and the files it changed (at most 10), each with the definitions the change touched: `changed`, `added` (only in the new version) or `removed` (only in the old). A change inside a method names the method, not the class around it. Files pack leaves out (a lockfile, vendored code) aren't listed. In a shallow clone, the oldest commit's parent is missing, so that commit shows only its message. Your git settings (`core.abbrev`, `diff.*`) don't change any of it.
-- **Files**: every packed file, READMEs first, then by path. Each sits under `### path` in a code fence tagged with its language, made longer than any run of backticks inside it, so a Markdown file with code blocks can't end it early. Line ends become `\n`, a byte order mark is dropped, and control characters other than tab and newline are written out as `\x1b` and so on, so the text stays plain text.
+- **Map**: every packed file with its line count. Under each, its definitions with their line numbers: top-level ones and those right inside them (a class's methods, a Rust `impl`'s functions), up to 60 per file, and Markdown headings down to `###`. Apps Script files (`.gs`) are read as JavaScript. Line numbers count from the top of the file, as in the file section below.
+- **Recent changes**: the last 20 commits (`-c N`), merges left out, newest first. Each has its date, short hash and subject (control characters written out, at most 160 characters), the first 8 lines of its message without trailers like `Co-Authored-By:`, and the files it changed (at most 10), each with the definitions the change touched: `changed`, `added` (only in the new version) or `removed` (only in the old). A change inside a method names the method, not the class around it. Files pack leaves out aren't listed either (a file that no longer exists is judged by its path). In a shallow clone, the oldest commit's parent is missing, so that commit shows only its message. Your git settings (`core.abbrev`, `diff.*`) don't change any of it.
+- **Files**: every packed file: the README at the top first, then the other files at the top, then the files in folders, each group by path. Each sits under `### path` in a code fence tagged with its language, made longer than any run of backticks inside it, so a Markdown file with code blocks can't end it early. Line ends become `\n`, a byte order mark is dropped, and control characters other than tab and newline are written out as `\x1b` and so on, so the text stays plain text.
 
 pack reads what git tracks (`git ls-files`), from the work tree. Untracked and ignored files never go in.
 
@@ -96,6 +96,8 @@ pack reads what git tracks (`git ls-files`), from the work tree. Untracked and i
 | binary | a NUL byte in the first 8,000 bytes, or bytes that aren't UTF-8 |
 | size | files over 256 KB (`--max-file KB`, 0 for no limit) |
 | other | symlinks, submodules, files deleted in the work tree |
+
+When pack clones a repository, Git LFS files aren't downloaded: their small pointer files stand in for them, and go in unless the name already leaves them out (an image, a font). A local checkout is read as it is.
 
 ### Parts
 

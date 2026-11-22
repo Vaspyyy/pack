@@ -33,7 +33,11 @@ Edit [repos.txt](repos.txt). After the next workflow run, a new repository gets 
 
 ## When something goes wrong
 
-A part that can't be downloaded or written is logged and tried again on the next run; the other parts go on. A Doc you move to the trash gets a new Doc on the next run (add that one to the notebook). A Doc that fails to open is kept and tried again, in case Google had a passing error; only after six failed tries in a row does it count as deleted, and the part gets a new Doc.
+A part that can't be downloaded or written is logged and tried again on the next run; the other parts go on. A Doc you move to the trash gets a new Doc on the next run (add that one to the notebook). Any other error keeps the Doc and tries again next run: only when Drive hasn't been able to find a Doc for three days does it count as deleted for good, and the part gets a new Doc.
+
+An hourly run that finds nothing changed only reads `pack.json` and the Docs' names; it opens no Doc.
+
+GitHub turns off a public repository's scheduled workflows after 60 days without activity in it (it emails a warning first). A push to this repository counts, a release upload doesn't. If that happens, `gh workflow enable notebook.yml -R Vaspyyy/pack` turns it back on.
 
 ## Growing and shrinking
 

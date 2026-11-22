@@ -35,9 +35,10 @@ function sync() {
 // After this long a run starts no new part, so it ends before Apps
 // Script's six-minute limit; the next run carries on.
 const TIME_BUDGET_MS = 4.5 * 60 * 1000;
-// A Doc that fails to open this many tries in a row counts as deleted for
-// good and gets a new Doc; a passing Google error clears up sooner.
-const OPEN_TRIES = 6;
+// A Doc that Drive can't find for this long counts as deleted for good
+// (emptied from the trash), and its part gets a new Doc. A Google error or
+// a used-up quota clears up long before.
+const GONE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 
 function syncNow_() {
   const started = Date.now();
@@ -84,11 +85,15 @@ function syncNow_() {
   console.log(summary);
 }
 
-/** Brings one part's Doc up to date. True if it was rewritten. */
+/**
+ * Brings one part's Doc up to date. True if it was rewritten. A Doc whose
+ * part didn't change is only looked at through Drive (its name), never
+ * opened: opening a Doc of a million characters takes time.
+ */
 function syncPart_(props, folder, base, f) {
   const shaKey = 'sha:' + f.file;
-  const doc = docFor_(props, folder, f);
-  if (doc.getName() !== f.title) doc.setName(f.title);
+  const file = existingFile_(props, f.file) || newDoc_(props, folder, f);
+  if (file.getName() !== f.title) file.setName(f.title);
   if (props.getProperty(shaKey) === f.sha256) return false;
   const part = UrlFetchApp.fetch(base + encodeURIComponent(f.file), { muteHttpExceptions: true });
   if (part.getResponseCode() !== 200) throw new Error('HTTP ' + part.getResponseCode());
@@ -96,61 +101,66 @@ function syncPart_(props, folder, base, f) {
   if (hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, part.getContent())) !== f.sha256) {
     throw new Error('not the version pack.json lists yet');
   }
+  const doc = DocumentApp.openById(file.getId());
   doc.getBody().setText(part.getContentText('UTF-8'));
   doc.saveAndClose();
   props.setProperty(shaKey, f.sha256);
-  console.log('updated ' + f.title + ' (' + f.chars + ' characters)');
+  console.log('updated ' + f.title + ' (' + commas_(f.chars) + ' characters)');
   return true;
 }
 
-/** The part's Doc: the one it had, or a new one in the folder. */
-function docFor_(props, folder, f) {
-  const doc = existingDoc_(props, f.file);
-  if (doc) return doc;
-  const made = DocumentApp.create(f.title);
-  DriveApp.getFileById(made.getId()).moveTo(folder);
-  props.setProperty('doc:' + f.file, made.getId());
+/** Makes a part's Doc in the folder; returns its Drive file. */
+function newDoc_(props, folder, f) {
+  const doc = DocumentApp.create(f.title);
+  const file = DriveApp.getFileById(doc.getId());
+  file.moveTo(folder);
+  props.setProperty('doc:' + f.file, doc.getId());
   props.deleteProperty('sha:' + f.file);
-  return made;
+  return file;
 }
 
 /**
- * The Doc a part had, or null if it had none or it is in the trash. An
- * error opening it is thrown, so the part is tried again next run with the
- * same Doc, until it has happened OPEN_TRIES times in a row: then the Doc
- * counts as deleted for good.
+ * The Drive file of the Doc a part had, or null if it had none or it is in
+ * the trash. When Drive can't get the file, the error is thrown, so the
+ * part is tried again next run with the same Doc, until that has gone on
+ * for GONE_AFTER_MS: then the Doc counts as deleted for good.
  */
-function existingDoc_(props, file) {
-  const id = props.getProperty('doc:' + file);
+function existingFile_(props, part) {
+  const id = props.getProperty('doc:' + part);
   if (!id) return null;
-  const failKey = 'fail:' + file;
+  const sinceKey = 'missing:' + part;
+  let file;
   try {
-    const doc = DriveApp.getFileById(id).isTrashed() ? null : DocumentApp.openById(id);
-    props.deleteProperty(failKey);
-    return doc;
+    file = DriveApp.getFileById(id);
   } catch (e) {
-    const fails = Number(props.getProperty(failKey) || 0) + 1;
-    if (fails >= OPEN_TRIES) {
-      props.deleteProperty(failKey);
-      console.warn(file + ': its Doc failed to open ' + fails + ' times in a row, so it counts as deleted');
-      return null;
-    }
-    props.setProperty(failKey, String(fails));
-    throw e;
+    const since = Number(props.getProperty(sinceKey)) || Date.now();
+    props.setProperty(sinceKey, String(since));
+    if (Date.now() - since < GONE_AFTER_MS) throw e;
+    props.deleteProperty(sinceKey);
+    console.warn(part + ': Drive has not found its Doc for three days, so it counts as deleted');
+    return null;
   }
+  props.deleteProperty(sinceKey);
+  return file.isTrashed() ? null : file;
 }
 
 /** Empties and renames the Doc of a part that is gone, once. */
-function retire_(props, file) {
-  if (props.getProperty('sha:' + file) === 'unused') return;
-  const doc = existingDoc_(props, file);
-  if (doc) {
-    doc.setName('(unused) ' + doc.getName());
+function retire_(props, part) {
+  if (props.getProperty('sha:' + part) === 'unused') return;
+  const file = existingFile_(props, part);
+  if (file) {
+    const doc = DocumentApp.openById(file.getId());
     doc.getBody().setText('This part is no longer published: its repository got smaller or was taken off the list. Remove this source from the notebook.');
     doc.saveAndClose();
-    console.log('emptied ' + file + ', which is no longer published');
+    file.setName('(unused) ' + file.getName());
+    console.log('emptied ' + part + ', which is no longer published');
   }
-  props.setProperty('sha:' + file, 'unused');
+  props.setProperty('sha:' + part, 'unused');
+}
+
+/** 575670 as "575,670". */
+function commas_(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 /** The Docs' folder: the one made before, else one by that name, else a new one. */

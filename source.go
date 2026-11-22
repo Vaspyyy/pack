@@ -16,7 +16,8 @@ import (
 // source is the repository being packed: a local work tree, or a shallow
 // clone of a GitHub repo.
 type source struct {
-	name    string // short name: the GitHub repo's name, else the folder's
+	name    string // short name: base, and the sub folder if there is one
+	base    string // the GitHub repo's name, else the work tree folder's
 	slug    string // owner/repo on GitHub; "" if not known
 	root    string // the work tree
 	sub     string // only this repo-relative folder ("" for all of it)
@@ -60,6 +61,13 @@ func open(arg string, commits int) (*source, error) {
 	if m == nil || m[2] == "." || m[2] == ".." {
 		return nil, fmt.Errorf("no folder by that name, and it isn't a GitHub repo (owner/repo)")
 	}
+	// "src/lib" where a folder src exists is a mistyped path, not a repo
+	// to ask GitHub for (github.com/src/lib works for that).
+	if first, _, _ := strings.Cut(arg, "/"); !strings.Contains(arg, "github.com") {
+		if fi, err := os.Stat(first); err == nil && fi.IsDir() {
+			return nil, fmt.Errorf("no folder by that name (for the GitHub repo, write github.com/%s)", arg)
+		}
+	}
 	return clone(m[1]+"/"+m[2], commits)
 }
 
@@ -80,10 +88,11 @@ func openDir(dir string) (*source, error) {
 	}
 	remote, _ := git(s.root, "remote", "get-url", "origin")
 	s.slug = slugOf(remote)
-	s.name = filepath.Base(s.root)
+	s.base = filepath.Base(s.root)
 	if s.slug != "" {
-		s.name = s.slug[strings.Index(s.slug, "/")+1:]
+		s.base = s.slug[strings.Index(s.slug, "/")+1:]
 	}
+	s.name = s.base
 	if s.sub != "" {
 		s.name += "-" + strings.ReplaceAll(s.sub, "/", "-")
 	}
@@ -104,7 +113,9 @@ func clone(slug string, commits int) (*source, error) {
 	// Merges aren't listed, so fetch more history than the commits shown.
 	depth := max(commits*3, 1)
 	cmd := exec.Command("git", "clone", "--quiet", "--no-tags", "--depth", strconv.Itoa(depth), githubURL(slug), dir)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	// No password prompts, and no Git LFS downloads: LFS files are media
+	// and binaries pack leaves out anyway.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_LFS_SKIP_SMUDGE=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(tmp)
 		return nil, fmt.Errorf("couldn't clone github.com/%s: %s", slug, firstLine(string(out), err))
@@ -116,7 +127,8 @@ func clone(slug string, commits int) (*source, error) {
 	}
 	s.temp = tmp
 	s.slug = slug
-	s.name = slug[strings.Index(slug, "/")+1:]
+	s.base = slug[strings.Index(slug, "/")+1:]
+	s.name = s.base
 	return s, nil
 }
 

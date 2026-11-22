@@ -466,3 +466,60 @@ func TestPreludeTooBigWarns(t *testing.T) {
 	}
 	wants(t, errs, "the map lists files without their definitions", "part 1 is longer than --max-chars")
 }
+
+func TestOneLineAndLeftOutInChanges(t *testing.T) {
+	dir := demo(t)
+	write(t, dir, "tool.gs", "function sync() {\n  return 1;\n}\n")
+	gitT(t, dir, "add", "-A")
+	gitT(t, dir, "commit", "-q", "-m", "red \x1b[31m subject")
+	out, _, _ := pack(t, dir)
+	wants(t, out, "red \\x1b[31m subject\n", "tool.gs (3 lines)\n  L1 function sync()\n", "  tool.gs (new): added sync\n")
+	lacks(t, out, "\x1b")
+	// The first commit added files pack leaves out: they aren't listed.
+	first := out[strings.Index(out, "first\n"):]
+	first = first[:strings.Index(first, "\n\n")]
+	for _, name := range []string{"data.bin", "big.txt", "logo.png", "go.sum", "LICENSE", "vendor/", "gen.go"} {
+		if strings.Contains(first, name) {
+			t.Errorf("Recent changes lists %s:\n%s", name, first)
+		}
+	}
+	wants(t, first, "  ctrl.txt (new)", "  main.go (new)")
+}
+
+func TestMistypedPathIsNotARepo(t *testing.T) {
+	isolate(t)
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("src", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, errs, code := pack(t, "src/lib")
+	if code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	wants(t, errs, "no folder by that name (for the GitHub repo, write github.com/src/lib)")
+}
+
+func TestManyPartsStayInsideTheLimit(t *testing.T) {
+	dir := demo(t)
+	for i := 0; i < 120; i++ {
+		write(t, dir, filepath.Join("p", itoa(1000+i)+".txt"), strings.Repeat("abcdefghi\n", 900))
+	}
+	gitT(t, dir, "add", "-A")
+	gitT(t, dir, "commit", "-q", "-m", "many parts")
+	outDir := t.TempDir()
+	_, errs, code := pack(t, "--max-chars", "10000", "-c", "0", "-o", outDir, dir)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	var m manifest
+	data, _ := os.ReadFile(filepath.Join(outDir, manifestName))
+	json.Unmarshal(data, &m)
+	if len(m.Files) < 100 {
+		t.Fatalf("only %d parts", len(m.Files))
+	}
+	for _, e := range m.Files {
+		if e.Chars > 10000 {
+			t.Errorf("%s: %d characters", e.File, e.Chars)
+		}
+	}
+}

@@ -34,8 +34,9 @@ type result struct {
 }
 
 const (
-	mapSymbols  = 60   // definitions listed per file in the map
-	symbolLimit = 5000 // definitions read per file
+	mapSymbols  = 60    // definitions listed per file in the map
+	symbolLimit = 5000  // definitions read per file
+	mostParts   = 99999 // part headers are sized for this many parts
 )
 
 func build(s *source, o options) (*result, error) {
@@ -45,21 +46,25 @@ func build(s *source, o options) (*result, error) {
 	}
 	marked := s.attrs(paths)
 	sk := newSkips()
+	left := map[string]bool{}
 	var files []*file
 	maxFile := int64(o.maxFileKB) << 10
 	for _, p := range paths {
 		if r := pathReason(p, o.excludes); r != "" {
-			ex := p
+			ex := oneLine(p)
 			if r == "vendored" {
-				ex = vendorExample(p)
+				ex = oneLine(vendorExample(p))
 			}
 			sk.add(r, ex)
 			continue
 		}
 		if r := marked[p]; r != "" {
-			sk.add(r, p)
+			sk.add(r, oneLine(p))
 			continue
 		}
+		// From here a file that is left out is remembered, so Recent
+		// changes doesn't list it either.
+		left[p] = true
 		full := filepath.Join(s.root, filepath.FromSlash(p))
 		fi, err := os.Lstat(full)
 		switch {
@@ -67,31 +72,34 @@ func build(s *source, o options) (*result, error) {
 			sk.add("missing", p)
 			continue
 		case fi.Mode()&os.ModeSymlink != 0:
-			sk.add("symlink", p)
+			sk.add("symlink", oneLine(p))
 			continue
 		case fi.IsDir():
-			sk.add("submodule", p)
+			sk.add("submodule", oneLine(p))
 			continue
 		case !fi.Mode().IsRegular():
 			continue
 		case o.maxFileKB > 0 && fi.Size() > maxFile:
-			sk.add("big", fmt.Sprintf("%s %s KB", p, num(int((fi.Size()+1023)>>10))))
+			sk.add("big", fmt.Sprintf("%s %s KB", oneLine(p), num(int((fi.Size()+1023)>>10))))
 			continue
 		}
 		data, err := os.ReadFile(full)
 		if err != nil {
-			sk.add("missing", p)
+			sk.add("missing", oneLine(p))
 			continue
 		}
 		if isBinary(data) {
-			sk.add("binary", p)
+			sk.add("binary", oneLine(p))
 			continue
 		}
+		delete(left, p)
 		f := &file{path: p, text: clean(data)}
 		f.lines = strings.Count(f.text, "\n")
 		f.lang, f.tag = language(p)
-		if outline.Supported(p) {
-			f.syms = outline.Parse(p, data, symbolLimit)
+		if outline.Supported(outlineName(p)) {
+			// The cleaned text, so the line numbers match the file as
+			// shown (an old Mac file's lone CRs became line ends).
+			f.syms = outline.Parse(outlineName(p), []byte(f.text), symbolLimit)
 		}
 		files = append(files, f)
 	}
@@ -101,7 +109,7 @@ func build(s *source, o options) (*result, error) {
 	// READMEs first: they say what the rest is for.
 	sort.SliceStable(files, func(i, j int) bool { return readmeRank(files[i].path, s.sub) < readmeRank(files[j].path, s.sub) })
 
-	keep := func(p string) bool { return pathReason(p, o.excludes) == "" && marked[p] == "" }
+	keep := func(p string) bool { return !left[p] && pathReason(p, o.excludes) == "" && marked[p] == "" }
 	commits, err := recent(s, o.commits, keep)
 	if err != nil {
 		return nil, err
@@ -119,31 +127,31 @@ func build(s *source, o options) (*result, error) {
 	prelude := func(part, parts int) string {
 		return h.render(part, parts) + mapText + changes + "## Files\n\n"
 	}
-	if limit > 0 && charCount(prelude(99, 99)) > limit*2/5 {
+	if limit > 0 && charCount(prelude(1, 1)) > limit*2/5 {
 		mapText = renderMap(files, false)
 		r.warnings = append(r.warnings, "the map lists files without their definitions, to fit")
 	}
-	if n := charCount(prelude(99, 99)); limit > 0 && n > limit {
+	if n := charCount(prelude(mostParts, mostParts)); limit > 0 && n > limit {
 		r.warnings = append(r.warnings, fmt.Sprintf("the header, map and recent changes alone are %s characters, so part 1 is longer than --max-chars; fewer commits (-c), fewer files (-x) or one subfolder at a time make it fit", num(n)))
 	}
 
 	blocks := make([]string, len(files))
 	for i, f := range files {
 		fc := fence(f.text)
-		blocks[i] = "### " + f.path + "\n\n" + fc + f.tag + "\n" + f.text + fc + "\n\n"
+		blocks[i] = "### " + oneLine(f.path) + "\n\n" + fc + f.tag + "\n" + f.text + fc + "\n\n"
 	}
 
-	// Assign files to parts. The headers are sized for 99 parts, so the
-	// real ones (fewer digits) can only be shorter.
+	// Assign files to parts. The headers are sized for mostParts parts,
+	// so the real ones (fewer digits) can only be shorter.
 	var parts [][]int
 	cur := []int{}
-	size := charCount(prelude(99, 99))
+	size := charCount(prelude(mostParts, mostParts))
 	for i, b := range blocks {
 		n := charCount(b)
 		if limit > 0 && size+n > limit && (len(cur) > 0 || len(parts) == 0) {
 			parts = append(parts, cur)
 			cur = []int{}
-			size = charCount(h.renderMore(99, 99))
+			size = charCount(h.renderMore(mostParts, mostParts))
 		}
 		if limit > 0 && size+n > limit {
 			r.warnings = append(r.warnings, fmt.Sprintf("%s alone is longer than a part (%s characters)", files[i].path, num(n)))
@@ -198,9 +206,9 @@ type header struct {
 }
 
 func (h header) what() string {
-	w := h.s.name
+	w := h.s.base
 	if h.s.sub != "" {
-		w = "the folder " + h.s.sub + "/ of " + w
+		w = "the folder " + oneLine(h.s.sub) + "/ of " + w
 	}
 	if h.s.slug != "" {
 		w += " (github.com/" + h.s.slug + ")"
@@ -261,7 +269,7 @@ func renderMap(files []*file, syms bool) string {
 	var b strings.Builder
 	b.WriteString("## Map\n\n")
 	for _, f := range files {
-		fmt.Fprintf(&b, "%s (%s %s)\n", f.path, num(f.lines), plural(f.lines, "line", "lines"))
+		fmt.Fprintf(&b, "%s (%s %s)\n", oneLine(f.path), num(f.lines), plural(f.lines, "line", "lines"))
 		if !syms {
 			continue
 		}
@@ -309,9 +317,5 @@ func sig(s outline.Symbol) string {
 	if t == "" {
 		t = s.Kind + " " + s.Name
 	}
-	t = strings.TrimSpace(strings.TrimSuffix(t, "{"))
-	if utf8.RuneCountInString(t) > 100 {
-		t = string([]rune(t)[:99]) + "…"
-	}
-	return t
+	return clip(strings.TrimSpace(strings.TrimSuffix(t, "{")), 100)
 }

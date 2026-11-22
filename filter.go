@@ -284,3 +284,38 @@ func langSummary(files []*file) string {
 	}
 	return strings.Join(out, ", ")
 }
+
+// oneLine writes the control characters in s as \xNN, newlines too (tabs
+// stay): for a path or a commit subject that must stay on one line.
+func oneLine(s string) string {
+	bad := func(r rune) bool { return (r < 0x20 && r != '\t') || r == 0x7f }
+	if !strings.ContainsFunc(s, bad) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if bad(r) {
+			fmt.Fprintf(&b, `\x%02x`, r)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// clip cuts s to at most n characters, ending in an ellipsis when cut.
+func clip(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n-1]) + "…"
+}
+
+// outlineName is the name prism's outline gets for a file, which picks the
+// language: Apps Script (.gs) is JavaScript.
+func outlineName(p string) string {
+	if strings.HasSuffix(strings.ToLower(p), ".gs") {
+		return p + ".js"
+	}
+	return p
+}
