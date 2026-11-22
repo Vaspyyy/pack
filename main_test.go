@@ -418,3 +418,51 @@ func TestBodyLines(t *testing.T) {
 		t.Errorf("%q", got)
 	}
 }
+
+func TestFirstCommitAndShallowBoundary(t *testing.T) {
+	dir := demo(t)
+	out, _, _ := pack(t, dir)
+	wants(t, out, "first\n  (the first commit)\n", "  main.go (new): added main, helper, gone\n")
+
+	// In a shallow clone the oldest commit's parent is missing: what it
+	// changed isn't known, and it isn't called the first commit.
+	shallow := filepath.Join(t.TempDir(), "demo")
+	gitT(t, filepath.Dir(shallow), "clone", "-q", "--depth", "1", "file://"+dir, shallow)
+	out, errs, code := pack(t, shallow)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	wants(t, out, "second\n    Why it changed.\n\n## Files")
+	lacks(t, out, "the first commit", "main.go (new)")
+}
+
+// Settings that change what git prints must not change pack's output.
+func TestGitSettingsDontChangeOutput(t *testing.T) {
+	dir := demo(t)
+	before, _, _ := pack(t, dir)
+	for _, kv := range [][2]string{
+		{"core.abbrev", "12"}, {"diff.noprefix", "true"}, {"diff.mnemonicPrefix", "true"},
+		{"diff.algorithm", "histogram"}, {"diff.interHunkContext", "10"}, {"diff.context", "5"},
+		{"diff.renames", "copies"}, {"color.ui", "always"}, {"log.showSignature", "false"},
+	} {
+		gitT(t, dir, "config", kv[0], kv[1])
+	}
+	after, _, _ := pack(t, dir)
+	if before != after {
+		t.Errorf("output changed with git settings:\n%s\n---\n%s", before, after)
+	}
+}
+
+func TestPreludeTooBigWarns(t *testing.T) {
+	dir := demo(t)
+	for i := 0; i < 600; i++ {
+		write(t, dir, filepath.Join("many", "file-with-a-longish-name-"+itoa(i)+".txt"), "x\n")
+	}
+	gitT(t, dir, "add", "-A")
+	gitT(t, dir, "commit", "-q", "-m", "many")
+	_, errs, code := pack(t, "--max-chars", "10000", "-o", t.TempDir(), dir)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	wants(t, errs, "the map lists files without their definitions", "part 1 is longer than --max-chars")
+}

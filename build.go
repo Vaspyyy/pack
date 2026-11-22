@@ -123,6 +123,9 @@ func build(s *source, o options) (*result, error) {
 		mapText = renderMap(files, false)
 		r.warnings = append(r.warnings, "the map lists files without their definitions, to fit")
 	}
+	if n := charCount(prelude(99, 99)); limit > 0 && n > limit {
+		r.warnings = append(r.warnings, fmt.Sprintf("the header, map and recent changes alone are %s characters, so part 1 is longer than --max-chars; fewer commits (-c), fewer files (-x) or one subfolder at a time make it fit", num(n)))
+	}
 
 	blocks := make([]string, len(files))
 	for i, f := range files {

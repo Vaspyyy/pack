@@ -120,6 +120,23 @@ func clone(slug string, commits int) (*source, error) {
 	return s, nil
 }
 
+// boundaries are the commits a shallow clone has without their parents.
+func (s *source) boundaries() map[string]bool {
+	b := map[string]bool{}
+	if !s.shallow {
+		return b
+	}
+	p, err := git(s.root, "rev-parse", "--path-format=absolute", "--git-path", "shallow")
+	if err != nil {
+		return b
+	}
+	data, _ := os.ReadFile(p)
+	for _, l := range strings.Fields(string(data)) {
+		b[l] = true
+	}
+	return b
+}
+
 func (s *source) close() {
 	if s.temp != "" {
 		os.RemoveAll(s.temp)

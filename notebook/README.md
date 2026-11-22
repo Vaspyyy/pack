@@ -22,7 +22,7 @@ publish them as release assets        one Google Doc each                   its 
    - Google Drive: to put them in a folder and notice when one was deleted,
    - external requests: to download the parts from GitHub,
    - triggers: to run every hour by itself.
-5. The execution log shows a line per Doc (`updated glint (575,670 characters)`). The Docs are in the Drive folder `Tool notebook`. If the first run stops at Apps Script's six-minute limit, the next hourly run carries on where it stopped: each Doc that was written is remembered.
+5. The execution log shows a line per Doc (`updated glint (575,670 characters)`). The Docs are in the Drive folder `Tool notebook`. A run starts no new Doc after four and a half minutes (Apps Script stops scripts at six); the next run carries on, since each Doc that was written is remembered.
 6. In [NotebookLM](https://notebooklm.google.com), make a notebook, choose **Add source**, then **Google Drive**, and pick the Docs in `Tool notebook`.
 
 From then on nothing needs doing. To refresh right away after a push to one of the repositories, start the workflow (`gh workflow run notebook.yml -R Vaspyyy/pack`), wait for it to finish, then run **sync** in the script editor.
@@ -30,6 +30,12 @@ From then on nothing needs doing. To refresh right away after a push to one of t
 ## Adding or removing a repository
 
 Edit [repos.txt](repos.txt). After the next workflow run, a new repository gets a new Doc (add it to the notebook once), and the Doc of a removed one is emptied and renamed "(unused) …".
+
+## When something goes wrong
+
+A part that can't be downloaded or written is logged and tried again on the next run; the other parts go on. A Doc you move to the trash gets a new Doc on the next run (add that one to the notebook). A Doc that fails to open is kept and tried again, in case Google had a passing error; only after six failed tries in a row does it count as deleted, and the part gets a new Doc.
+
+## Growing and shrinking
 
 A repository that grows past 1,000,000 characters gets a second part and so a new Doc (`lumen-2.md`, titled "lumen (part 2 of 2)"). When it shrinks back, the Doc of the part that is gone is emptied and renamed "(unused) …", so the notebook shows which source to remove.
 

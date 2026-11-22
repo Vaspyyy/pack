@@ -78,7 +78,7 @@ The last 6 commits, newest first (merges left out). ...
 
 - **The header**: the repository, commit and date (and "with uncommitted changes" for a local folder that has them), the number of files and lines by language, and what was left out, counted by reason with a few names each.
 - **Map**: every packed file with its line count. Under each, its definitions with their line numbers: top-level ones and those right inside them (a class's methods, a Rust `impl`'s functions), up to 60 per file, and Markdown headings down to `###`. Line numbers count from the top of the file, as in the file section below.
-- **Recent changes**: the last 20 commits (`-c N`), merges left out, newest first. Each has its date, short hash and subject, the first 8 lines of its message without trailers like `Co-Authored-By:`, and the files it changed, each with the definitions the change touched: `changed`, `added` (only in the new version) or `removed` (only in the old). A change inside a method names the method, not the class around it. Files pack leaves out (a lockfile, vendored code) aren't listed.
+- **Recent changes**: the last 20 commits (`-c N`), merges left out, newest first. Each has its date, short hash and subject, the first 8 lines of its message without trailers like `Co-Authored-By:`, and the files it changed (at most 10), each with the definitions the change touched: `changed`, `added` (only in the new version) or `removed` (only in the old). A change inside a method names the method, not the class around it. Files pack leaves out (a lockfile, vendored code) aren't listed. In a shallow clone, the oldest commit's parent is missing, so that commit shows only its message. Your git settings (`core.abbrev`, `diff.*`) don't change any of it.
 - **Files**: every packed file, READMEs first, then by path. Each sits under `### path` in a code fence tagged with its language, made longer than any run of backticks inside it, so a Markdown file with code blocks can't end it early. Line ends become `\n`, a byte order mark is dropped, and control characters other than tab and newline are written out as `\x1b` and so on, so the text stays plain text.
 
 pack reads what git tracks (`git ls-files`), from the work tree. Untracked and ignored files never go in.
@@ -137,7 +137,7 @@ Every repository is read before anything is written: if one can't be packed, pac
 | `-h`, `--help` | help |
 | `-V`, `--version` | version |
 
-Exit code: 0 packed, 2 bad input or a repository that couldn't be read. Warnings (a map without definitions to fit a part, a single file longer than a part) go to standard error.
+Exit code: 0 packed, 2 bad input or a repository that couldn't be read. Warnings (a map without definitions, to fit; a first part or a single file longer than `--max-chars`) go to standard error.
 
 ## For coding agents
 

@@ -39,28 +39,41 @@ func recent(s *source, n int, keep func(string) bool) ([]commit, error) {
 	if n == 0 {
 		return nil, nil
 	}
-	out, err := git(s.root, "log", "--no-merges", "-n", strconv.Itoa(n), "--format=%H%x1f%h%x1f%cs%x1f%s%x1f%P%x1f%b%x1e", "HEAD", "--", pathspec(s.sub))
+	out, err := git(s.root, "log", "--no-merges", "--no-show-signature", "--encoding=UTF-8", "-n", strconv.Itoa(n),
+		"--format=%H%x1f%cs%x1f%s%x1f%P%x1f%b%x1e", "HEAD", "--", pathspec(s.sub))
 	if err != nil {
 		return nil, err
 	}
+	boundary := s.boundaries()
 	bl := &blobs{dir: s.root}
 	defer bl.close()
 	var commits []commit
 	for _, rec := range strings.Split(out, "\x1e") {
 		f := strings.Split(strings.TrimLeft(rec, "\n"), "\x1f")
-		if len(f) < 6 {
+		if len(f) < 5 {
 			continue
 		}
-		c := commit{short: f[1], date: f[2], subject: f[3], body: bodyLines(f[5])}
-		parent := strings.Fields(f[4])
-		if len(parent) == 0 {
-			// The first commit, or the oldest one a shallow clone has (its
-			// parent wasn't fetched): its diff would be the whole tree.
-			c.first = !s.shallow
+		// The short hash is cut here, not by git, whose length follows
+		// core.abbrev and the size of the repository.
+		c := commit{short: short(f[0]), date: f[1], subject: f[2], body: bodyLines(f[4])}
+		parent := ""
+		if ps := strings.Fields(f[3]); len(ps) > 0 {
+			parent = ps[0]
+		} else if boundary[f[0]] {
+			// The oldest commit a shallow clone has: its parent wasn't
+			// fetched, so what it changed isn't known.
 			commits = append(commits, c)
 			continue
+		} else {
+			c.first = true
 		}
-		diff, err := gitRaw(s.root, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "-U0", parent[0], f[0], "--", pathspec(s.sub))
+		// diff-tree, not diff: plumbing, so diff.* settings (noprefix,
+		// mnemonicPrefix, algorithm, …) can't change what is read. The
+		// options that matter are given anyway. --root diffs the first
+		// commit against nothing.
+		diff, err := gitRaw(s.root, "diff-tree", "-p", "--root", "--no-commit-id", "--no-color", "--no-ext-diff", "--no-textconv",
+			"--no-renames", "-U0", "--inter-hunk-context=0", "--diff-algorithm=myers", "--indent-heuristic",
+			"--src-prefix=a/", "--dst-prefix=b/", f[0], "--", pathspec(s.sub))
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +97,7 @@ func recent(s *source, n int, keep func(string) bool) ([]commit, error) {
 				fc.status = "deleted"
 			}
 			if outline.Supported(p) && len(fd.hunks) > 0 {
-				touched(&fc, fd, bl, parent[0], f[0])
+				touched(&fc, fd, bl, parent, f[0])
 			}
 			c.files = append(c.files, fc)
 		}
@@ -419,12 +432,16 @@ func (b *blobs) get(rev, path string) ([]byte, bool) {
 		b.bad = true
 		return nil, false
 	}
+	if f[1] != "blob" || size > outline.MaxSize {
+		// Skip it (and the newline after it) without holding it.
+		if _, err := io.CopyN(io.Discard, b.out, int64(size)+1); err != nil {
+			b.bad = true
+		}
+		return nil, false
+	}
 	data := make([]byte, size+1) // and the newline after it
 	if _, err := io.ReadFull(b.out, data); err != nil {
 		b.bad = true
-		return nil, false
-	}
-	if f[1] != "blob" || size > outline.MaxSize {
 		return nil, false
 	}
 	return data[:size], true
