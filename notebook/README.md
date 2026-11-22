@@ -9,7 +9,7 @@ publish them as release assets        one Google Doc each                   its 
 ```
 
 1. **[.github/workflows/notebook.yml](../.github/workflows/notebook.yml)** packs every repository in `repos.txt` every six hours, after every push to this repository's `main`, and when started by hand. It publishes the parts and `pack.json` as assets of the [`notebook` release](https://github.com/Vaspyyy/pack/releases/tag/notebook). When nothing changed, it leaves the assets alone.
-2. **[sync.gs](sync.gs)** runs in your Google account every hour. It reads `pack.json` and, for each part whose SHA-256 changed, downloads it, checks the SHA-256, and writes it into that part's Google Doc in a Drive folder called `Tool notebook`. Each part always goes into the same Doc, so a notebook source made from it stays the same source.
+2. **[sync.gs](sync.gs)** runs in your Google account every hour. It reads `pack.json` and, for each part whose SHA-256 changed, downloads it, checks the SHA-256, and uploads it to Drive as that part's Google Doc in a Drive folder called `Tool notebook` (one upload per Doc, which Drive converts in seconds). Each part always goes into the same Doc, so a notebook source made from it stays the same source.
 3. **NotebookLM** uses the Docs as sources. A Google Doc added from Drive stays linked to it: since May 2026 NotebookLM syncs such sources by itself (Google rolled this out gradually), and where it doesn't yet, a source's sync button pulls in the new text. An uploaded file is a copy that never changes.
 
 ## Setup (once, about five minutes)
@@ -18,10 +18,11 @@ publish them as release assets        one Google Doc each                   its 
 2. Replace everything in `Code.gs` with the contents of [sync.gs](sync.gs) and save (Ctrl+S).
 3. In the toolbar, choose the function **setup** and click **Run**.
 4. Google asks for permission: click **Review permissions** and pick your account. It's your own script, so Google warns that it hasn't verified it: click **Advanced**, then **Go to "Tool notebook sync" (unsafe)**, then **Allow**. The script asks for:
-   - Google Docs: to write the Docs,
-   - Google Drive: to put them in a folder and notice when one was deleted,
-   - external requests: to download the parts from GitHub,
+   - Google Drive: to make the Docs in a folder, write them and notice when one was deleted,
+   - external requests: to download the parts from GitHub and hand them to Drive's upload service, which turns each into its Doc's text,
    - triggers: to run every hour by itself.
+
+   If the log says the Drive API is off for the script, click **+** next to **Services** in the editor, pick **Drive API**, click **Add**, and run **sync** again.
 5. The execution log shows a line per Doc (`updated glint (575,670 characters)`). The Docs are in the Drive folder `Tool notebook`. A run starts no new Doc after four and a half minutes (Apps Script stops scripts at six); the next run carries on, since each Doc that was written is remembered.
 6. In [NotebookLM](https://notebooklm.google.com), make a notebook, choose **Add source**, then **Google Drive**, and pick the Docs in `Tool notebook`.
 

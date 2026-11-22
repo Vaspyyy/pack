@@ -87,42 +87,63 @@ function syncNow_() {
 
 /**
  * Brings one part's Doc up to date. True if it was rewritten. A Doc whose
- * part didn't change is only looked at through Drive (its name), never
- * opened: opening a Doc of a million characters takes time.
+ * part didn't change is only looked at through Drive (its name). A changed
+ * part goes to Drive in one upload that Drive turns into the Doc's text:
+ * writing a million characters through DocumentApp takes longer than a run
+ * may last.
  */
 function syncPart_(props, folder, base, f) {
   const shaKey = 'sha:' + f.file;
-  const file = existingFile_(props, f.file) || newDoc_(props, folder, f);
-  if (file.getName() !== f.title) file.setName(f.title);
-  if (props.getProperty(shaKey) === f.sha256) return false;
+  const file = existingFile_(props, f.file);
+  if (file && file.getName() !== f.title) file.setName(f.title);
+  if (file && props.getProperty(shaKey) === f.sha256) return false;
   const part = UrlFetchApp.fetch(base + encodeURIComponent(f.file), { muteHttpExceptions: true });
   if (part.getResponseCode() !== 200) throw new Error('HTTP ' + part.getResponseCode());
+  const bytes = part.getContent();
   // A part being replaced right now can be the old or the new version.
-  if (hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, part.getContent())) !== f.sha256) {
+  if (hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)) !== f.sha256) {
     throw new Error('not the version pack.json lists yet');
   }
-  const doc = DocumentApp.openById(file.getId());
-  doc.getBody().setText(part.getContentText('UTF-8'));
-  doc.saveAndClose();
+  if (file) {
+    upload_(file.getId(), { name: f.title, mimeType: DOC_TYPE }, bytes);
+  } else {
+    const id = upload_('', { name: f.title, mimeType: DOC_TYPE, parents: [folder.getId()] }, bytes);
+    props.setProperty('doc:' + f.file, id);
+  }
   props.setProperty(shaKey, f.sha256);
   console.log('updated ' + f.title + ' (' + commas_(f.chars) + ' characters)');
   return true;
 }
 
-/** Makes a part's Doc in the folder; returns its Drive file. */
-function newDoc_(props, folder, f) {
-  const doc = DocumentApp.create(f.title);
-  // Remembered before anything else can fail, so a failed move doesn't
-  // make another Doc next run.
-  props.setProperty('doc:' + f.file, doc.getId());
-  props.deleteProperty('sha:' + f.file);
-  const file = DriveApp.getFileById(doc.getId());
-  try {
-    file.moveTo(folder);
-  } catch (e) {
-    console.warn(f.file + ': its new Doc stays in My Drive (' + e.message + ')');
+const DOC_TYPE = 'application/vnd.google-apps.document';
+
+/**
+ * Uploads text to Drive as a Google Doc: a new one (id "") or over the
+ * text of an existing one, which keeps its id, so a notebook source made
+ * from it stays the same. Returns the Doc's id.
+ */
+function upload_(id, metadata, bytes) {
+  const boundary = 'pack' + Utilities.getUuid().replace(/-/g, '');
+  const head = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
+    '\r\n--' + boundary + '\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n';
+  const tail = '\r\n--' + boundary + '--\r\n';
+  const body = Utilities.newBlob(head).getBytes().concat(bytes, Utilities.newBlob(tail).getBytes());
+  const url = 'https://www.googleapis.com/upload/drive/v3/files' + (id ? '/' + encodeURIComponent(id) : '') + '?uploadType=multipart&fields=id';
+  const res = UrlFetchApp.fetch(url, {
+    method: id ? 'patch' : 'post',
+    contentType: 'multipart/related; boundary=' + boundary,
+    payload: body,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() !== 200) {
+    const why = res.getContentText();
+    if (/accessNotConfigured|SERVICE_DISABLED|has not been used in project/.test(why)) {
+      throw new Error('the Drive API is off for this script: in the editor, click + next to Services, pick Drive API, click Add, then run sync again');
+    }
+    throw new Error('Drive upload: HTTP ' + res.getResponseCode() + ': ' + why.slice(0, 300));
   }
-  return file;
+  return JSON.parse(res.getContentText()).id;
 }
 
 /**
@@ -155,10 +176,8 @@ function retire_(props, part) {
   if (props.getProperty('sha:' + part) === 'unused') return;
   const file = existingFile_(props, part);
   if (file) {
-    const doc = DocumentApp.openById(file.getId());
-    doc.getBody().setText('This part is no longer published: its repository got smaller or was taken off the list. Remove this source from the notebook.');
-    doc.saveAndClose();
-    file.setName('(unused) ' + file.getName());
+    const text = 'This part is no longer published: its repository got smaller or was taken off the list. Remove this source from the notebook.\n';
+    upload_(file.getId(), { name: '(unused) ' + file.getName(), mimeType: DOC_TYPE }, Utilities.newBlob(text).getBytes());
     console.log('emptied ' + part + ', which is no longer published');
   }
   props.setProperty('sha:' + part, 'unused');
